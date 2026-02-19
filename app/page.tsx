@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface Teacher {
   id: string;
@@ -73,158 +74,220 @@ export default function Home() {
   const [view, setView] = useState<"teachers" | "admin" | "years" | "schedule">("teachers");
   const [isMounted, setIsMounted] = useState(false);
 
-  // Cargar datos del localStorage al montar
+  // Cargar datos de Supabase al montar
   useEffect(() => {
     setIsMounted(true);
-    try {
-      const savedTeachers = localStorage.getItem("teachers");
-      const savedSubjects = localStorage.getItem("subjects");
-      const savedYears = localStorage.getItem("years");
-      const savedYearSubjects = localStorage.getItem("yearSubjects");
-      const savedScheduleEntries = localStorage.getItem("scheduleEntries");
+    loadDataFromSupabase();
+    setupRealtimeListeners();
+  }, []);
 
-      if (savedTeachers) {
-        const parsedTeachers = JSON.parse(savedTeachers) as Teacher[];
-        const migratedTeachers = parsedTeachers.map((t) => ({
-          ...t,
+  const loadDataFromSupabase = async () => {
+    try {
+      // Cargar teachers
+      const { data: teachersData } = await supabase.from("teachers").select("*");
+      if (teachersData) {
+        const migratedTeachers = teachersData.map((t: any) => ({
+          id: t.id,
+          name: t.name,
           lastName: t.lastName || "",
           availableDays: t.availableDays || [0, 1, 2, 3, 4],
         }));
         setTeachers(migratedTeachers);
       }
-      if (savedSubjects) {
-        // Limpiar la propiedad hoursByYear si existe (es obsoleta)
-        const parsedSubjects = JSON.parse(savedSubjects) as any[];
-        const cleanedSubjects = parsedSubjects.map((s) => ({
-          id: s.id,
-          name: s.name,
-          teacherId: s.teacherId,
-        }));
-        setSubjects(cleanedSubjects);
+
+      // Cargar subjects
+      const { data: subjectsData } = await supabase.from("subjects").select("*");
+      if (subjectsData) {
+        setSubjects(subjectsData);
       }
-      if (savedYears) setYears(JSON.parse(savedYears));
-      if (savedYearSubjects) setYearSubjects(JSON.parse(savedYearSubjects));
-      if (savedScheduleEntries) {
-        // Migrar scheduleEntries: yearLevel → yearId
-        const parsed = JSON.parse(savedScheduleEntries) as any[];
-        const migrated = parsed.map((e) => ({
-          ...e,
-          yearId: e.yearId || e.yearLevel, // Mantener compatibilidad tem poral
-        }));
-        setScheduleEntries(migrated);
+
+      // Cargar years
+      const { data: yearsData } = await supabase.from("years").select("*");
+      if (yearsData) {
+        setYears(yearsData);
+      }
+
+      // Cargar yearSubjects
+      const { data: yearSubjectsData } = await supabase.from("yearSubjects").select("*");
+      if (yearSubjectsData) {
+        setYearSubjects(yearSubjectsData);
+      }
+
+      // Cargar scheduleEntries
+      const { data: scheduleEntriesData } = await supabase.from("scheduleEntries").select("*");
+      if (scheduleEntriesData) {
+        setScheduleEntries(scheduleEntriesData);
       }
     } catch (error) {
-      console.error("Error loading from localStorage:", error);
+      console.error("Error loading from Supabase:", error);
     }
-  }, []);
+  };
 
-  // Guardar profesores al cambiar
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem("teachers", JSON.stringify(teachers));
-    }
-  }, [teachers, isMounted]);
+  const setupRealtimeListeners = () => {
+    // Listener para teachers
+    const teachersChannel = supabase
+      .channel("teachers-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "teachers" },
+        (payload) => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
 
-  // Guardar materias al cambiar
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem("subjects", JSON.stringify(subjects));
-    }
-  }, [subjects, isMounted]);
+    // Listener para subjects
+    const subjectsChannel = supabase
+      .channel("subjects-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "subjects" },
+        (payload) => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
 
-  // Guardar horarios al cambiar
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem("scheduleEntries", JSON.stringify(scheduleEntries));
-    }
-  }, [scheduleEntries, isMounted]);
+    // Listener para years
+    const yearsChannel = supabase
+      .channel("years-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "years" },
+        (payload) => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
 
-  // Guardar años al cambiar
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem("years", JSON.stringify(years));
-    }
-  }, [years, isMounted]);
+    // Listener para yearSubjects
+    const yearSubjectsChannel = supabase
+      .channel("yearSubjects-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "yearSubjects" },
+        (payload) => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
 
-  // Guardar asignaciones de materias por año
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem("yearSubjects", JSON.stringify(yearSubjects));
-    }
-  }, [yearSubjects, isMounted]);
+    // Listener para scheduleEntries
+    const scheduleEntriesChannel = supabase
+      .channel("scheduleEntries-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "scheduleEntries" },
+        (payload) => {
+          loadDataFromSupabase();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      teachersChannel.unsubscribe();
+      subjectsChannel.unsubscribe();
+      yearsChannel.unsubscribe();
+      yearSubjectsChannel.unsubscribe();
+      scheduleEntriesChannel.unsubscribe();
+    };
+  };
+
 
   // Agregar profesor
-  const addTeacher = () => {
+  const addTeacher = async () => {
     if (teacherName.trim() && teacherLastName.trim() && teacherAvailableDays.length > 0) {
-      setTeachers([
-        ...teachers,
-        { 
-          id: Date.now().toString(), 
-          name: teacherName,
-          lastName: teacherLastName,
-          availableDays: teacherAvailableDays
-        },
-      ]);
-      setTeacherName("");
-      setTeacherLastName("");
-      setTeacherAvailableDays([0, 1, 2, 3, 4]); // Reset a todos disponibles
+      const newTeacher = { 
+        name: teacherName,
+        lastName: teacherLastName,
+        availableDays: teacherAvailableDays
+      };
+      
+      const { data, error } = await supabase
+        .from("teachers")
+        .insert([newTeacher])
+        .select();
+
+      if (!error && data) {
+        setTeachers([...teachers, data[0]]);
+        setTeacherName("");
+        setTeacherLastName("");
+        setTeacherAvailableDays([0, 1, 2, 3, 4]);
+      } else {
+        alert("Error al guardar el profesor");
+      }
     } else {
       alert("Completa todos los campos y selecciona al menos un día disponible");
     }
   };
 
   // Agregar materia
-  const addSubject = () => {
+  const addSubject = async () => {
     if (subjectName.trim() && selectedTeacherForSubject) {
-      setSubjects([
-        ...subjects,
-        { 
-          id: Date.now().toString(), 
-          name: subjectName,
-          teacherId: selectedTeacherForSubject,
-        },
-      ]);
-      setSubjectName("");
-      setSelectedTeacherForSubject("");
+      const newSubject = { 
+        name: subjectName,
+        teacherId: selectedTeacherForSubject,
+      };
+      
+      const { data, error } = await supabase
+        .from("subjects")
+        .insert([newSubject])
+        .select();
+
+      if (!error && data) {
+        setSubjects([...subjects, data[0]]);
+        setSubjectName("");
+        setSelectedTeacherForSubject("");
+      } else {
+        alert("Error al guardar la materia");
+      }
     } else {
       alert("Debes completar el nombre de la materia y seleccionar un profesor");
     }
   };
 
   // Agregar año
-  const addYear = () => {
+  const addYear = async () => {
     const level = parseInt(newYearLevel);
     if (level > 0 && !years.find((y) => y.level === level)) {
-      setYears([
-        ...years,
-        {
-          id: Date.now().toString(),
-          level,
-        },
-      ]);
-      setNewYearLevel("");
+      const { data, error } = await supabase
+        .from("years")
+        .insert([{ level }])
+        .select();
+
+      if (!error && data) {
+        setYears([...years, data[0]]);
+        setNewYearLevel("");
+      } else {
+        alert("Error al guardar el año");
+      }
     } else {
       alert("Ingresa un nivel válido y no duplicado");
     }
   };
 
   // Agregar materia a un año con horas específicas
-  const addSubjectToYear = () => {
+  const addSubjectToYear = async () => {
     const hours = parseInt(selectedSubjectHours);
     if (selectedYearForSubjects && selectedSubjectForYear && hours > 0) {
       // Verificar que no exista ya
       if (!yearSubjects.find((ys) => ys.yearId === selectedYearForSubjects && ys.subjectId === selectedSubjectForYear)) {
-        setYearSubjects([
-          ...yearSubjects,
-          {
-            id: Date.now().toString(),
+        const { data, error } = await supabase
+          .from("yearSubjects")
+          .insert([{
             yearId: selectedYearForSubjects,
             subjectId: selectedSubjectForYear,
             hoursRequired: hours,
-          },
-        ]);
-        setSelectedSubjectForYear("");
-        setSelectedSubjectHours("");
+          }])
+          .select();
+
+        if (!error && data) {
+          setYearSubjects([...yearSubjects, data[0]]);
+          setSelectedSubjectForYear("");
+          setSelectedSubjectHours("");
+        } else {
+          alert("Error al guardar la asignación");
+        }
       } else {
         alert("Esta materia ya está asignada a este año");
       }
@@ -234,9 +297,15 @@ export default function Home() {
   };
 
   // Eliminar profesor
-  const deleteTeacher = (id: string) => {
-    setTeachers(teachers.filter((t) => t.id !== id));
-    setScheduleEntries(scheduleEntries.filter((e) => e.teacherId !== id));
+  const deleteTeacher = async (id: string) => {
+    const { error } = await supabase.from("teachers").delete().eq("id", id);
+    
+    if (!error) {
+      setTeachers(teachers.filter((t) => t.id !== id));
+      setScheduleEntries(scheduleEntries.filter((e) => e.teacherId !== id));
+    } else {
+      alert("Error al eliminar el profesor");
+    }
   };
 
   // Iniciar edición de días disponibles
@@ -249,15 +318,24 @@ export default function Home() {
   };
 
   // Guardar cambios de días disponibles
-  const saveTeacherDays = () => {
+  const saveTeacherDays = async () => {
     if (editingTeacherId) {
-      setTeachers(
-        teachers.map((t) =>
-          t.id === editingTeacherId ? { ...t, availableDays: tempAvailableDays } : t
-        )
-      );
-      setEditingTeacherId(null);
-      setTempAvailableDays([]);
+      const { error } = await supabase
+        .from("teachers")
+        .update({ availableDays: tempAvailableDays })
+        .eq("id", editingTeacherId);
+
+      if (!error) {
+        setTeachers(
+          teachers.map((t) =>
+            t.id === editingTeacherId ? { ...t, availableDays: tempAvailableDays } : t
+          )
+        );
+        setEditingTeacherId(null);
+        setTempAvailableDays([]);
+      } else {
+        alert("Error al guardar los cambios");
+      }
     }
   };
 
@@ -268,26 +346,44 @@ export default function Home() {
   };
 
   // Eliminar materia
-  const deleteSubject = (id: string) => {
-    setSubjects(subjects.filter((s) => s.id !== id));
-    setYearSubjects(yearSubjects.filter((ys) => ys.subjectId !== id));
-    setScheduleEntries(scheduleEntries.filter((e) => e.subjectId !== id));
+  const deleteSubject = async (id: string) => {
+    const { error } = await supabase.from("subjects").delete().eq("id", id);
+    
+    if (!error) {
+      setSubjects(subjects.filter((s) => s.id !== id));
+      setYearSubjects(yearSubjects.filter((ys) => ys.subjectId !== id));
+      setScheduleEntries(scheduleEntries.filter((e) => e.subjectId !== id));
+    } else {
+      alert("Error al eliminar la materia");
+    }
   };
 
   // Eliminar año
-  const deleteYear = (id: string) => {
-    setYears(years.filter((y) => y.id !== id));
-    setYearSubjects(yearSubjects.filter((ys) => ys.yearId !== id));
-    setScheduleEntries(scheduleEntries.filter((e) => e.yearId !== id));
+  const deleteYear = async (id: string) => {
+    const { error } = await supabase.from("years").delete().eq("id", id);
+    
+    if (!error) {
+      setYears(years.filter((y) => y.id !== id));
+      setYearSubjects(yearSubjects.filter((ys) => ys.yearId !== id));
+      setScheduleEntries(scheduleEntries.filter((e) => e.yearId !== id));
+    } else {
+      alert("Error al eliminar el año");
+    }
   };
 
   // Eliminar asignación de materia a año
-  const deleteYearSubject = (id: string) => {
-    setYearSubjects(yearSubjects.filter((ys) => ys.id !== id));
-    setScheduleEntries(scheduleEntries.filter((e) => {
-      const ys = yearSubjects.find(y => y.id === id);
-      return !(e.yearId === ys?.yearId && e.subjectId === ys?.subjectId);
-    }));
+  const deleteYearSubject = async (id: string) => {
+    const { error } = await supabase.from("yearSubjects").delete().eq("id", id);
+    
+    if (!error) {
+      setYearSubjects(yearSubjects.filter((ys) => ys.id !== id));
+      setScheduleEntries(scheduleEntries.filter((e) => {
+        const ys = yearSubjects.find(y => y.id === id);
+        return !(e.yearId === ys?.yearId && e.subjectId === ys?.subjectId);
+      }));
+    } else {
+      alert("Error al eliminar la asignación");
+    }
   };
 
   // Contar horas asignadas de una materia en un año
@@ -329,7 +425,7 @@ export default function Home() {
   };
 
   // Agregar entrada de horario
-  const addScheduleEntry = (
+  const addScheduleEntry = async (
     timeSlotId: string,
     dayIndex: number,
     yearId: string,
@@ -355,22 +451,33 @@ export default function Home() {
     }
 
     // Eliminar entrada anterior en este horario/día/año si existe
-    setScheduleEntries((entries) =>
-      entries.filter((e) => !(e.timeSlotId === timeSlotId && e.dayIndex === dayIndex && e.yearId === yearId))
+    const previousEntry = scheduleEntries.find((e) => 
+      e.timeSlotId === timeSlotId && e.dayIndex === dayIndex && e.yearId === yearId
     );
+    if (previousEntry) {
+      await supabase.from("scheduleEntries").delete().eq("id", previousEntry.id);
+    }
 
     // Agregar nueva entrada
-    setScheduleEntries((entries) => [
-      ...entries,
-      {
-        id: Date.now().toString(),
+    const { data, error } = await supabase
+      .from("scheduleEntries")
+      .insert([{
         timeSlotId,
         dayIndex,
         teacherId,
         subjectId,
         yearId,
-      },
-    ]);
+      }])
+      .select();
+
+    if (!error && data) {
+      setScheduleEntries((entries) =>
+        entries.filter((e) => !(e.timeSlotId === timeSlotId && e.dayIndex === dayIndex && e.yearId === yearId))
+      );
+      setScheduleEntries((entries) => [...entries, data[0]]);
+    } else {
+      alert("Error al guardar la entrada de horario");
+    }
   };
 
   // Obtener entrada de horario
@@ -385,10 +492,16 @@ export default function Home() {
   };
 
   // Eliminar entrada de horario
-  const deleteScheduleEntry = (entryId: string) => {
-    setScheduleEntries(
-      scheduleEntries.filter((e) => e.id !== entryId)
-    );
+  const deleteScheduleEntry = async (entryId: string) => {
+    const { error } = await supabase.from("scheduleEntries").delete().eq("id", entryId);
+    
+    if (!error) {
+      setScheduleEntries(
+        scheduleEntries.filter((e) => e.id !== entryId)
+      );
+    } else {
+      alert("Error al eliminar la entrada de horario");
+    }
   };
 
   const getTeacherName = (id: string) => {
