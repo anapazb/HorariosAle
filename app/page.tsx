@@ -459,15 +459,17 @@ export default function Home() {
     }
 
     // Agregar nueva entrada
+    const newEntry = {
+      timeSlotId: String(timeSlotId),
+      dayIndex: Number(dayIndex),
+      teacherId: String(teacherId),
+      subjectId: String(subjectId),
+      yearId: String(yearId),
+    };
+    console.log(newEntry);
     const { data, error } = await supabase
       .from("scheduleEntries")
-      .insert([{
-        timeSlotId,
-        dayIndex,
-        teacherId,
-        subjectId,
-        yearId,
-      }])
+      .insert([newEntry])
       .select();
 
     if (!error && data) {
@@ -476,7 +478,8 @@ export default function Home() {
       );
       setScheduleEntries((entries) => [...entries, data[0]]);
     } else {
-      alert("Error al guardar la entrada de horario");
+      console.error("Error insertando horario:", error);
+      alert(`Error al guardar la entrada de horario: ${error?.message || "Error desconocido"}`);
     }
   };
 
